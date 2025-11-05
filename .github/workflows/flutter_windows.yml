@@ -1,0 +1,33 @@
+name: Flutter Windows Build
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+jobs:
+  flutter_windows_build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.2'
+          channel: 'stable'
+      - name: Get dependencies
+        working-directory: ./usr
+        run: flutter pub get
+      - name: Enable Windows
+        working-directory: ./usr
+        run: flutter config --enable-windows-desktop
+      - name: Build Windows application
+        working-directory: ./usr
+        run: flutter build windows --release
+      - name: Create ZIP archive for artifacts
+        run: |
+          Compress-Archive -Path ./usr/build/windows/x64/runner/Release/* -DestinationPath windows-app.zip
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-build
+          path: windows-app.zip
+          retention-days: 7

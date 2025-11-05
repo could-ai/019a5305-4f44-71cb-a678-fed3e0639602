@@ -1,0 +1,167 @@
+name: Flutter iOS Build and Publish
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+jobs:
+  flutter_ios_build_publish:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps: 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2.0'
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.2'
+          channel: 'stable'
+      - name: Setup Ruby for Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+      - name: Install Fastlane
+        run: gem install fastlane
+      - name: Get dependencies
+        working-directory: ./usr
+        run: flutter pub get
+      - name: Prepare iOS certificate
+        working-directory: ./usr/ios
+        run: |
+          # 创建证书文件
+          echo "${{ secrets.IOS_P12_CERTIFICATE_BASE64 }}" | base64 --decode > certificate.p12
+          echo "Certificate decoded and saved to certificate.p12"
+      - name: Create iOS Fastfile
+        run: |
+          mkdir -p ./usr/ios/fastlane
+          echo '# Disable Fastlane'"'"'s usage data collection' > ./usr/ios/fastlane/Fastfile
+          echo 'opt_out_usage' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo 'default_platform(:ios)' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo 'platform :ios do' >> ./usr/ios/fastlane/Fastfile
+          echo '  desc "Build and publish iOS app"' >> ./usr/ios/fastlane/Fastfile
+          echo '  lane :build_and_publish do' >> ./usr/ios/fastlane/Fastfile
+          echo '    # Setup CI environment for proper keychain access' >> ./usr/ios/fastlane/Fastfile
+          echo '    setup_ci(force: true, timeout: 0)' >> ./usr/ios/fastlane/Fastfile
+          echo '    # Ensure we can find code signing identity' >> ./usr/ios/fastlane/Fastfile 
+          echo '    create_keychain(' >> ./usr/ios/fastlane/Fastfile
+          echo '      name: "ios-build.keychain",' >> ./usr/ios/fastlane/Fastfile
+          echo '      password: "",' >> ./usr/ios/fastlane/Fastfile  
+          echo '      default_keychain: true,' >> ./usr/ios/fastlane/Fastfile
+          echo '      unlock: true,' >> ./usr/ios/fastlane/Fastfile
+          echo '      timeout: 3600,' >> ./usr/ios/fastlane/Fastfile
+          echo '      lock_when_sleeps: false' >> ./usr/ios/fastlane/Fastfile
+          echo '    )' >> ./usr/ios/fastlane/Fastfile
+          echo '    begin' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Parse App Store Connect API credentials from environment' >> ./usr/ios/fastlane/Fastfile
+          echo '      api_key_json = ENV['"'"'APP_STORE_CREDENTIALS_JSON'"'"']' >> ./usr/ios/fastlane/Fastfile
+          echo '      api_key_data = JSON.parse(api_key_json)' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Create App Store Connect API key from credentials' >> ./usr/ios/fastlane/Fastfile
+          echo '      api_key = app_store_connect_api_key(' >> ./usr/ios/fastlane/Fastfile
+          echo '        key_id: api_key_data["key_id"],' >> ./usr/ios/fastlane/Fastfile
+          echo '        issuer_id: api_key_data["issuer_id"],' >> ./usr/ios/fastlane/Fastfile
+          echo '        key_content: api_key_data["api_key"],' >> ./usr/ios/fastlane/Fastfile
+          echo '        in_house: false,' >> ./usr/ios/fastlane/Fastfile
+          echo '        is_key_content_base64: false' >> ./usr/ios/fastlane/Fastfile
+          echo '      )' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Import certificate from base64-encoded P12' >> ./usr/ios/fastlane/Fastfile
+          echo '      import_certificate(' >> ./usr/ios/fastlane/Fastfile
+          echo '        certificate_path: "certificate.p12",' >> ./usr/ios/fastlane/Fastfile
+          echo '        certificate_password: ENV['"'"'IOS_CERTIFICATE_PASSWORD'"'"'],' >> ./usr/ios/fastlane/Fastfile
+          echo '        keychain_name: "ios-build.keychain",' >> ./usr/ios/fastlane/Fastfile
+          echo '        keychain_password: ""' >> ./usr/ios/fastlane/Fastfile
+          echo '      )' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Generate provisioning profile using sigh' >> ./usr/ios/fastlane/Fastfile
+          echo '      sigh(' >> ./usr/ios/fastlane/Fastfile
+          echo '        app_identifier: ENV['"'"'PACKAGE_NAME'"'"'],' >> ./usr/ios/fastlane/Fastfile
+          echo '        api_key: api_key,' >> ./usr/ios/fastlane/Fastfile
+          echo '        team_id: ENV['"'"'IOS_TEAM_ID'"'"'],' >> ./usr/ios/fastlane/Fastfile
+          echo '        force: true' >> ./usr/ios/fastlane/Fastfile
+          echo '      )' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Setup manual code signing' >> ./usr/ios/fastlane/Fastfile
+          echo '      update_code_signing_settings(' >> ./usr/ios/fastlane/Fastfile
+          echo '        use_automatic_signing: false,' >> ./usr/ios/fastlane/Fastfile
+          echo '        path: "../ios/Runner.xcodeproj",' >> ./usr/ios/fastlane/Fastfile
+          echo '        code_sign_identity: "Apple Distribution",' >> ./usr/ios/fastlane/Fastfile
+          echo '        bundle_identifier: ENV['"'"'PACKAGE_NAME'"'"'],' >> ./usr/ios/fastlane/Fastfile
+          echo '        profile_name: lane_context[SharedValues::SIGH_NAME],' >> ./usr/ios/fastlane/Fastfile
+          echo '        profile_uuid: lane_context[SharedValues::SIGH_UUID],' >> ./usr/ios/fastlane/Fastfile
+          echo '        team_id: ENV['"'"'IOS_TEAM_ID'"'"']' >> ./usr/ios/fastlane/Fastfile
+          echo '      )' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Print current signing settings for debugging' >> ./usr/ios/fastlane/Fastfile
+          echo '      puts "Using provisioning profile: #{lane_context[SharedValues::SIGH_NAME]} (#{lane_context[SharedValues::SIGH_UUID]})"' >> ./usr/ios/fastlane/Fastfile
+          echo '      puts "For app identifier: #{ENV['"'"'PACKAGE_NAME'"'"']}"' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Build the app' >> ./usr/ios/fastlane/Fastfile
+          echo '      gym(' >> ./usr/ios/fastlane/Fastfile
+          echo '        workspace: "../ios/Runner.xcworkspace",' >> ./usr/ios/fastlane/Fastfile
+          echo '        scheme: "Runner",' >> ./usr/ios/fastlane/Fastfile
+          echo '        output_directory: "./build/ios/ipa",' >> ./usr/ios/fastlane/Fastfile
+          echo '        output_name: "app.ipa",' >> ./usr/ios/fastlane/Fastfile
+          echo '        export_method: "app-store",' >> ./usr/ios/fastlane/Fastfile
+          echo '        xcargs: "-allowProvisioningUpdates",' >> ./usr/ios/fastlane/Fastfile
+          echo '        include_symbols: true,' >> ./usr/ios/fastlane/Fastfile
+          echo '        include_bitcode: false,' >> ./usr/ios/fastlane/Fastfile
+          echo '        export_options: {' >> ./usr/ios/fastlane/Fastfile
+          echo '          method: "app-store",' >> ./usr/ios/fastlane/Fastfile
+          echo '          team_id: ENV['"'"'IOS_TEAM_ID'"'"'],' >> ./usr/ios/fastlane/Fastfile
+          echo '          provisioningProfiles: {' >> ./usr/ios/fastlane/Fastfile
+          echo '            ENV['"'"'PACKAGE_NAME'"'"'] => lane_context[SharedValues::SIGH_NAME]' >> ./usr/ios/fastlane/Fastfile
+          echo '          }' >> ./usr/ios/fastlane/Fastfile
+          echo '        },' >> ./usr/ios/fastlane/Fastfile
+          echo '        clean: true' >> ./usr/ios/fastlane/Fastfile
+          echo '      )' >> ./usr/ios/fastlane/Fastfile
+          echo '' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Upload to App Store Connect' >> ./usr/ios/fastlane/Fastfile
+          echo '      upload_to_app_store(' >> ./usr/ios/fastlane/Fastfile
+          echo '        api_key: api_key,' >> ./usr/ios/fastlane/Fastfile
+          echo '        app_identifier: ENV['"'"'PACKAGE_NAME'"'"'],' >> ./usr/ios/fastlane/Fastfile
+          echo '        team_id: ENV['"'"'IOS_TEAM_ID'"'"'],' >> ./usr/ios/fastlane/Fastfile
+          echo '        ipa: "./build/ios/ipa/app.ipa",' >> ./usr/ios/fastlane/Fastfile
+          echo '        skip_screenshots: true,' >> ./usr/ios/fastlane/Fastfile
+          echo '        skip_metadata: true,' >> ./usr/ios/fastlane/Fastfile
+          echo '        precheck_include_in_app_purchases: false,' >> ./usr/ios/fastlane/Fastfile
+          echo '        submit_for_review: false' >> ./usr/ios/fastlane/Fastfile
+          echo '      )' >> ./usr/ios/fastlane/Fastfile
+          echo '    # Ruby ensure block - always executed regardless of exceptions' >> ./usr/ios/fastlane/Fastfile
+          echo '    ensure' >> ./usr/ios/fastlane/Fastfile
+          echo '      # Clear any temporary resources if needed' >> ./usr/ios/fastlane/Fastfile
+          echo '    # End of begin-ensure-end block' >> ./usr/ios/fastlane/Fastfile
+          echo '    end' >> ./usr/ios/fastlane/Fastfile
+          echo '  end # End of lane' >> ./usr/ios/fastlane/Fastfile
+          echo 'end # End of platform' >> ./usr/ios/fastlane/Fastfile
+      - name: Update project.pbxproj for manual signing
+        working-directory: ./usr/ios
+        run: |
+          echo "Configuring project for manual signing..."
+          # Use a simple sed command to ensure code signing is properly configured
+          sed -i '' 's/ProvisioningStyle = Automatic;/ProvisioningStyle = Manual;/g' Runner.xcodeproj/project.pbxproj
+          # Make sure the product bundle identifier is correctly set
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = .*;/PRODUCT_BUNDLE_IDENTIFIER = ${{ secrets.PACKAGE_NAME }};/g" Runner.xcodeproj/project.pbxproj
+          # Set the development team ID
+          sed -i '' "s/DEVELOPMENT_TEAM = .*;/DEVELOPMENT_TEAM = ${{ secrets.IOS_TEAM_ID }};/g" Runner.xcodeproj/project.pbxproj
+          # If team ID doesn't exist yet, add it to all targets - use proper syntax without escape characters
+          grep -q "DEVELOPMENT_TEAM" Runner.xcodeproj/project.pbxproj || sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER/a\\
+          DEVELOPMENT_TEAM = ${{ secrets.IOS_TEAM_ID }};" Runner.xcodeproj/project.pbxproj
+      - name: Build and publish iOS app with Fastlane
+        working-directory: ./usr/ios
+        env:
+          PACKAGE_NAME: ${{ secrets.PACKAGE_NAME }}
+          APP_STORE_CREDENTIALS_JSON: ${{ secrets.APP_STORE_CREDENTIALS_JSON }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: fastlane build_and_publish
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-build
+          path: ./usr/ios/build/ios/ipa/*.ipa
+          retention-days: 7

@@ -1,0 +1,35 @@
+name: Flutter macOS Build
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+jobs:
+  flutter_macos_build:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.2'
+          channel: 'stable'
+      - name: Get dependencies
+        working-directory: ./usr
+        run: flutter pub get
+      - name: Enable macOS
+        working-directory: ./usr
+        run: flutter config --enable-macos-desktop
+      - name: Build macOS application
+        working-directory: ./usr
+        run: flutter build macos --release
+      - name: Create ZIP archive for artifacts
+        working-directory: ./usr
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -r macos-app.zip *.app
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-build
+          path: ./usr/build/macos/Build/Products/Release/macos-app.zip
+          retention-days: 7

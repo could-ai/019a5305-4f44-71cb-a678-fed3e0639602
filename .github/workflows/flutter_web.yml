@@ -1,0 +1,38 @@
+name: Flutter Web Build and Deploy
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+permissions:
+  contents: read    # Read permission for repository contents
+  pages: write      # Write permission for GitHub Pages
+  id-token: write   # Permission to write OIDC token
+jobs:
+  flutter_web_build_deploy: # Single job for building and deploying
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }} # URL for the deployed GitHub Pages site
+    steps:   
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Checks out the repository code at ${{ github.sha }}
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2 # Sets up Flutter environment
+        with:
+          flutter-version: '3.29.2' # Specify Flutter version
+          channel: 'stable'           # Specify Flutter channel
+      - name: Get dependencies
+        working-directory: ./usr # Specifies working directory for Flutter commands
+        run: flutter pub get      # Gets Flutter dependencies
+      - name: Enable web
+        working-directory: ./usr
+        run: flutter config --enable-web # Enables web support for Flutter project
+      - name: Build web application
+        working-directory: ./usr
+        run: flutter build web --release --base-href / # Builds Flutter web application in release mode with base href for correct asset loading
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3 # Uploads build artifact for GitHub Pages
+        with:
+          path: ./usr/build/web # Path to the build output directory
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4 # Deploys the artifact to GitHub Pages

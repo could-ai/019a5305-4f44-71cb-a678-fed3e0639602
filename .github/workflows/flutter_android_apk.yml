@@ -1,0 +1,70 @@
+name: Flutter Android APK Build
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+jobs:
+  flutter_android_apk_build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.2'
+          channel: 'stable'
+      - name: Get dependencies
+        working-directory: ./usr
+        run: flutter pub get
+      - name: Setup Android signing
+        run: |
+          echo "Setting up Android signing configuration..."
+          # Create keystore file, ensure path name and content are correct
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
+          
+          # Verify keystore file
+          echo "Verifying if the keystore file is valid..."
+          ls -la keystore.jks
+          
+          # Use keytool to verify the validity of the keystore and all alias details
+          echo "Verifying keystore details..."
+          keytool -list -v -keystore keystore.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          
+          # Ensure android directory exists (should normally exist, but just in case)
+          echo "Ensuring android directory exists..."
+          mkdir -p ./usr/android
+          
+          # Create key.properties file, ensure storeFile uses absolute path
+          KEYSTORE_PATH="$(pwd)/keystore.jks"
+          echo "Using keystore path: $KEYSTORE_PATH"
+          
+          echo "storeFile=$KEYSTORE_PATH" > ./usr/android/key.properties
+          echo "storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> ./usr/android/key.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> ./usr/android/key.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> ./usr/android/key.properties
+          
+          # Verify key.properties file content (without displaying passwords)
+          echo "key.properties created at: ./usr/android/key.properties"
+          cat ./usr/android/key.properties | grep -v "storePassword\|keyPassword"
+          
+          # Verify Gradle can correctly find key.properties
+          echo "Verifying android directory structure..."
+          ls -la ./usr/android/
+          
+          # Verify whether the keystore contains the specified alias
+          echo "Verifying if the keystore contains the alias: ${{ secrets.ANDROID_KEY_ALIAS }}"
+          keytool -list -v -keystore keystore.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" | grep -i "alias name: ${{ secrets.ANDROID_KEY_ALIAS }}"
+      - name: Build Android application
+        working-directory: ./usr
+        run: flutter build apk --release
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: ./usr/build/app/outputs/flutter-apk/*.apk
+          retention-days: 7

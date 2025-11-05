@@ -1,0 +1,142 @@
+name: Flutter Android App Bundle Build and Publish
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+jobs:
+  flutter_android_bundle_build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - name: Setup Ruby for Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.2'
+          channel: 'stable'
+      - name: Get dependencies
+        working-directory: ./usr
+        run: flutter pub get
+      - name: Setup Android signing
+        run: |
+          echo "Setting up Android signing configuration..."
+          # Create keystore file, ensure path name and content are correct
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
+          
+          # Verify keystore file
+          echo "Verifying if the keystore file is valid..."
+          ls -la keystore.jks
+          
+          # Use keytool to verify the validity of the keystore and all alias details
+          echo "Verifying keystore details..."
+          keytool -list -v -keystore keystore.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          
+          # Ensure android directory exists (should normally exist, but just in case)
+          echo "Ensuring android directory exists..."
+          mkdir -p ./usr/android
+          
+          # Create key.properties file, ensure storeFile uses absolute path
+          KEYSTORE_PATH="$(pwd)/keystore.jks"
+          echo "Using keystore path: $KEYSTORE_PATH"
+          
+          echo "storeFile=$KEYSTORE_PATH" > ./usr/android/key.properties
+          echo "storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> ./usr/android/key.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> ./usr/android/key.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> ./usr/android/key.properties
+          
+          # Verify key.properties file content (without displaying passwords)
+          echo "key.properties created at: ./usr/android/key.properties"
+          cat ./usr/android/key.properties | grep -v "storePassword\|keyPassword"
+          
+          # Verify Gradle can correctly find key.properties
+          echo "Verifying android directory structure..."
+          ls -la ./usr/android/
+          
+          # Verify whether the keystore contains the specified alias
+          echo "Verifying if the keystore contains the alias: ${{ secrets.ANDROID_KEY_ALIAS }}"
+          keytool -list -v -keystore keystore.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" | grep -i "alias name: ${{ secrets.ANDROID_KEY_ALIAS }}"
+      - name: Build Android application
+        working-directory: ./usr
+        run: flutter build appbundle --release
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-bundle
+          path: ./usr/build/app/outputs/bundle/release/*.aab
+          retention-days: 7
+      - name: Create Android Fastfile
+        run: |
+          mkdir -p ./usr/android/fastlane
+          echo '# Disable Fastlane'"'"'s usage data collection' > ./usr/android/fastlane/Fastfile
+          echo 'opt_out_usage' >> ./usr/android/fastlane/Fastfile
+          echo '' >> ./usr/android/fastlane/Fastfile
+          echo 'default_platform(:android)' >> ./usr/android/fastlane/Fastfile
+          echo '' >> ./usr/android/fastlane/Fastfile
+          echo 'platform :android do' >> ./usr/android/fastlane/Fastfile
+          echo '  desc "Deploy to Google Play"' >> ./usr/android/fastlane/Fastfile
+          echo '  lane :publish_to_play_store do' >> ./usr/android/fastlane/Fastfile
+          echo '    puts "Using package name: #{ENV['"'"'PACKAGE_NAME'"'"']}"' >> ./usr/android/fastlane/Fastfile
+          echo '    ' >> ./usr/android/fastlane/Fastfile
+          echo '    begin' >> ./usr/android/fastlane/Fastfile
+          echo '      # Try publishing the app with completed status' >> ./usr/android/fastlane/Fastfile
+          echo '      upload_to_play_store(' >> ./usr/android/fastlane/Fastfile
+          echo '        package_name: ENV['"'"'PACKAGE_NAME'"'"'],' >> ./usr/android/fastlane/Fastfile
+          echo '        track: '"'"'internal'"'"',' >> ./usr/android/fastlane/Fastfile
+          echo '        aab: '"'"'../build/app/outputs/bundle/release/app-release.aab'"'"',' >> ./usr/android/fastlane/Fastfile
+          echo '        json_key_data: ENV['"'"'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'"'"'],' >> ./usr/android/fastlane/Fastfile
+          echo '        skip_upload_metadata: true,' >> ./usr/android/fastlane/Fastfile
+          echo '        skip_upload_images: true,' >> ./usr/android/fastlane/Fastfile
+          echo '        skip_upload_screenshots: true,' >> ./usr/android/fastlane/Fastfile
+          echo '        release_status: '"'"'completed'"'"'' >> ./usr/android/fastlane/Fastfile
+          echo '      )' >> ./usr/android/fastlane/Fastfile
+          echo '    rescue => e' >> ./usr/android/fastlane/Fastfile
+          echo '      # Capture error message' >> ./usr/android/fastlane/Fastfile
+          echo '      puts "First upload attempt failed: #{e}"' >> ./usr/android/fastlane/Fastfile
+          echo '      ' >> ./usr/android/fastlane/Fastfile
+          echo '      # Check if it contains a specific error message' >> ./usr/android/fastlane/Fastfile
+          echo '      if e.to_s.include?("Only releases with status draft may be created on draft app")' >> ./usr/android/fastlane/Fastfile
+          echo '        puts "Detected draft app, retrying with draft release status..."' >> ./usr/android/fastlane/Fastfile
+          echo '        ' >> ./usr/android/fastlane/Fastfile
+          echo '        # Try again with draft status' >> ./usr/android/fastlane/Fastfile
+          echo '        upload_to_play_store(' >> ./usr/android/fastlane/Fastfile
+          echo '          package_name: ENV['"'"'PACKAGE_NAME'"'"'],' >> ./usr/android/fastlane/Fastfile
+          echo '          track: '"'"'internal'"'"',' >> ./usr/android/fastlane/Fastfile
+          echo '          aab: '"'"'../build/app/outputs/bundle/release/app-release.aab'"'"',' >> ./usr/android/fastlane/Fastfile
+          echo '          json_key_data: ENV['"'"'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'"'"'],' >> ./usr/android/fastlane/Fastfile
+          echo '          skip_upload_metadata: true,' >> ./usr/android/fastlane/Fastfile
+          echo '          skip_upload_images: true,' >> ./usr/android/fastlane/Fastfile
+          echo '          skip_upload_screenshots: true,' >> ./usr/android/fastlane/Fastfile
+          echo '          release_status: '"'"'draft'"'"'' >> ./usr/android/fastlane/Fastfile
+          echo '        )' >> ./usr/android/fastlane/Fastfile
+          echo '      else' >> ./usr/android/fastlane/Fastfile
+          echo '        # If it'"'"'s another error, throw the original error' >> ./usr/android/fastlane/Fastfile
+          echo '        raise e' >> ./usr/android/fastlane/Fastfile
+          echo '      end' >> ./usr/android/fastlane/Fastfile
+          echo '    end' >> ./usr/android/fastlane/Fastfile
+          echo '  end' >> ./usr/android/fastlane/Fastfile
+          echo 'end' >> ./usr/android/fastlane/Fastfile
+      - name: Install Fastlane
+        run: gem install fastlane
+      - name: Check Fastlane configuration
+        working-directory: ./usr/android
+        run: |
+          echo "Checking Fastlane directory structure:"
+          ls -la fastlane/
+          echo "\nChecking Fastfile content:"
+          cat fastlane/Fastfile
+      - name: Deploy to Google Play
+        id: deploy_to_google_play        
+        working-directory: ./usr/android
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          PACKAGE_NAME: ${{ secrets.PACKAGE_NAME }}
+        run: fastlane publish_to_play_store

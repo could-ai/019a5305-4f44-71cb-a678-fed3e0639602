@@ -1,0 +1,37 @@
+name: Flutter Linux Build
+on:
+  workflow_dispatch: # Allows manual triggering of the workflow
+jobs:
+  flutter_linux_build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.2'
+          channel: 'stable'
+      - name: Get dependencies
+        working-directory: ./usr
+        run: flutter pub get
+      - name: Enable Linux
+        working-directory: ./usr
+        run: flutter config --enable-linux-desktop
+      - name: Build Linux application
+        working-directory: ./usr
+        run: flutter build linux --release
+      - name: Create tar archive for artifacts
+        run: |
+          tar -czf linux-app.tar.gz -C ./usr/build/linux/x64/release/bundle .
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-build
+          path: linux-app.tar.gz
+          retention-days: 7
